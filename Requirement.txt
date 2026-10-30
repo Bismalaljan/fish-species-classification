@@ -1,5 +1,5 @@
 streamlit
-torch
-transformers
+torch==2.6.0
+transformers==4.48.3
 Pillow
 safetensors
