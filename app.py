@@ -2,341 +2,348 @@
 import streamlit as st
 import torch
 import torch.nn.functional as F
-import streamlit.components.v1 as components
-import json
-
-from transformers import (
-    ViTImageProcessor,
-    ViTForImageClassification,
-    CLIPProcessor,
-    CLIPModel
-)
+from transformers import ViTImageProcessor, ViTForImageClassification
 from PIL import Image
 
-# ---------------- PAGE SETTINGS ----------------
+# ---------------- PAGE CONFIGURATION ----------------
 st.set_page_config(
     page_title="AquaVision AI",
     page_icon="🐠",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-# ---------------- CUSTOM DESIGN ----------------
+MODEL_ID = "BismaLJ/fish_species_classification"
+
+# ---------------- PROFESSIONAL CUSTOM DESIGN ----------------
 st.markdown("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif;
+}
+
 .stApp {
-    background: linear-gradient(135deg, #061b2b, #073b4c, #087e8b);
-    color: white;
+    background:
+        radial-gradient(circle at 15% 10%, #123c55 0%, transparent 35%),
+        linear-gradient(135deg, #061522, #092b3b 55%, #064b55);
+    color: #f1f7fa;
 }
+
 .block-container {
+    max-width: 1150px;
     padding-top: 2rem;
-    max-width: 1100px;
+    padding-bottom: 3rem;
 }
+
 .hero {
     text-align: center;
-    padding: 35px 20px;
-    border-radius: 22px;
-    background: linear-gradient(120deg, #064663, #087e8b, #00a896);
-    box-shadow: 0 8px 30px rgba(0,0,0,0.25);
-    margin-bottom: 25px;
+    padding: 55px 25px 45px;
+    border: 1px solid rgba(125, 211, 225, 0.22);
+    border-radius: 25px;
+    background: linear-gradient(120deg,
+        rgba(10, 65, 86, 0.95),
+        rgba(0, 137, 145, 0.75));
+    margin-bottom: 35px;
+    box-shadow: 0 15px 45px rgba(0,0,0,0.25);
 }
+
 .hero h1 {
-    color: white;
-    font-size: 46px;
-    margin-bottom: 8px;
+    color: #ffffff;
+    font-size: 48px;
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    margin-bottom: 10px;
 }
+
 .hero p {
-    color: #e0fbfc;
-    font-size: 18px;
+    color: #d5f3f5;
+    font-size: 17px;
+    margin: 5px 0;
 }
-.info-card {
-    background: rgba(255,255,255,0.10);
-    border: 1px solid rgba(255,255,255,0.2);
-    padding: 18px;
-    border-radius: 16px;
-    text-align: center;
-    margin-bottom: 15px;
+
+.section-title {
+    font-size: 25px;
+    font-weight: 700;
+    color: #e8fbff;
+    margin: 25px 0 15px;
 }
+
+.panel {
+    background: rgba(255,255,255,0.065);
+    border: 1px solid rgba(255,255,255,0.13);
+    border-radius: 18px;
+    padding: 24px;
+    margin-bottom: 20px;
+}
+
 .result-card {
-    background: linear-gradient(120deg, #00a896, #028090);
-    padding: 25px;
+    background: linear-gradient(120deg, #087f83, #06a6a0);
+    border: 1px solid rgba(255,255,255,0.2);
     border-radius: 20px;
+    padding: 30px 20px;
     text-align: center;
-    color: white;
-    margin-top: 15px;
-    box-shadow: 0 8px 25px rgba(0,0,0,0.25);
+    margin: 20px 0;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.2);
 }
+
 .result-card h2 {
     color: white;
-    font-size: 30px;
+    font-size: 32px;
+    font-weight: 800;
+    margin-bottom: 8px;
 }
-h2, h3, h4, p, label {
-    color: white !important;
+
+.result-card p {
+    color: #e2ffff;
+    margin: 0;
 }
+
+.stButton > button {
+    width: 100%;
+    border: none;
+    border-radius: 12px;
+    padding: 14px;
+    background: linear-gradient(90deg, #00bfa6, #00a6b2);
+    color: white;
+    font-weight: 700;
+    font-size: 16px;
+    transition: 0.2s ease;
+}
+
+.stButton > button:hover {
+    background: linear-gradient(90deg, #00d5b5, #00c1ca);
+    color: #062b36;
+    border: none;
+}
+
 [data-testid="stFileUploader"] {
-    background: rgba(255,255,255,0.08);
-    border: 1px dashed #64dfdf;
-    padding: 15px;
+    background: rgba(255,255,255,0.04);
+    border: 1px dashed #54cbd0;
+    padding: 18px;
     border-radius: 15px;
 }
+
+[data-testid="stCameraInput"] {
+    border-radius: 15px;
+}
+
+.stProgress > div > div > div {
+    background-color: #00c6ad;
+}
+
+h2, h3, h4, p, label {
+    color: #f1f7fa;
+}
+
 div[data-testid="stMetric"] {
-    background: rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.07);
     padding: 15px;
-    border-radius: 15px;
+    border-radius: 14px;
 }
+
 footer {
     visibility: hidden;
 }
+
+#MainMenu {
+    visibility: hidden;
+}
+
+.footer {
+    text-align: center;
+    color: #a9cbd2;
+    padding: 30px 10px 5px;
+    border-top: 1px solid rgba(255,255,255,0.12);
+    margin-top: 45px;
+    font-size: 13px;
+}
 </style>
 """, unsafe_allow_html=True)
+
 
 # ---------------- HERO SECTION ----------------
 st.markdown("""
 <div class="hero">
     <h1>🐠 AquaVision AI</h1>
-    <p>Discover the underwater world with Artificial Intelligence</p>
-    <p>Upload a fish image and let Vision Transformer identify its species.</p>
+    <p>Explore the underwater world through Artificial Intelligence.</p>
+    <p>Upload or capture a fish image to discover its predicted species.</p>
 </div>
 """, unsafe_allow_html=True)
 
-# ---------------- PROJECT INFORMATION ----------------
-c1, c2, c3 = st.columns(3)
 
-with c1:
-    st.markdown("""
-    <div class="info-card">
-        <h2>🐟 15</h2><p>Fish Species</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with c2:
-    st.markdown("""
-    <div class="info-card">
-        <h2>🎯 82%</h2><p>Test Accuracy</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with c3:
-    st.markdown("""
-    <div class="info-card">
-        <h2>🧠 ViT + CLIP</h2><p>AI Image Checking</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-# ---------------- LOAD ORIGINAL FISH MODEL ----------------
-MODEL_ID = "BismaLJ/fish_species_classification"
-
+# ---------------- LOAD EXISTING MODEL ----------------
 @st.cache_resource
-def load_fish_model():
+def load_model():
     processor = ViTImageProcessor.from_pretrained(MODEL_ID)
     model = ViTForImageClassification.from_pretrained(MODEL_ID)
+
     model.eval()
+
     return processor, model
 
-# ---------------- LOAD SEPARATE IMAGE CHECKER ----------------
-CLIP_ID = "openai/clip-vit-base-patch32"
-
-@st.cache_resource
-def load_clip_model():
-    processor = CLIPProcessor.from_pretrained(CLIP_ID)
-    model = CLIPModel.from_pretrained(CLIP_ID)
-    model.eval()
-    return processor, model
 
 try:
-    with st.spinner("Loading AquaVision AI models..."):
-        fish_processor, fish_model = load_fish_model()
-        clip_processor, clip_model = load_clip_model()
+    with st.spinner("Preparing your AI experience..."):
+        processor, model = load_model()
 
-    st.success("AquaVision AI is ready!")
+    st.success("AquaVision AI is ready.")
 
 except Exception as e:
-    st.error(f"Could not load models: {e}")
+    st.error(f"Unable to load the AI model: {e}")
     st.stop()
 
-# ---------------- CHECK WHETHER IMAGE IS A FISH ----------------
-def check_if_fish(image):
-    candidate_texts = [
-        "a photograph of a fish",
-        "a photograph of something that is not a fish"
-    ]
 
-    inputs = clip_processor(
-        text=candidate_texts,
-        images=image,
-        return_tensors="pt",
-        padding=True
-    )
-
-    with torch.inference_mode():
-        outputs = clip_model(**inputs)
-        scores = outputs.logits_per_image.softmax(dim=1)[0]
-
-    fish_score = scores[0].item()
-    non_fish_score = scores[1].item()
-
-    return fish_score, non_fish_score
-
-# ---------------- SPEECH FUNCTION ----------------
-def speak_result(message):
-    safe_message = json.dumps(message)
-
-    html = f"""
-    <div style="text-align:center;">
-        <button onclick='
-            window.speechSynthesis.cancel();
-            var speech = new SpeechSynthesisUtterance({safe_message});
-            speech.lang = "en-US";
-            speech.rate = 0.9;
-            window.speechSynthesis.speak(speech);
-        '
-        style="
-            background: linear-gradient(90deg,#00c9a7,#00a6a6);
-            color:white;
-            border:none;
-            padding:12px 25px;
-            border-radius:10px;
-            font-size:17px;
-            font-weight:bold;
-            cursor:pointer;">
-            🔊 Speak Result
-        </button>
-    </div>
-    """
-
-    components.html(html, height=65)
-
-# ---------------- IMAGE INPUT ----------------
-st.markdown("## 📸 Upload or Capture an Image")
-st.write("Choose an image from your device or use your camera.")
-
-input_method = st.radio(
-    "Select image source:",
-    ["Upload Image", "Take a Photo"],
-    horizontal=True
+# ---------------- IMAGE INPUT SECTION ----------------
+st.markdown(
+    '<div class="section-title">📷 Image Analysis</div>',
+    unsafe_allow_html=True
 )
 
-if input_method == "Upload Image":
-    image_file = st.file_uploader(
-        "Choose an image",
-        type=["jpg", "jpeg", "png"]
+left, right = st.columns([1, 1], gap="large")
+
+with left:
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+
+    input_method = st.radio(
+        "Choose your image source",
+        ["Upload Image", "Use Camera"],
+        horizontal=True
     )
-else:
-    image_file = st.camera_input("Capture an image")
+
+    image_file = None
+
+    if input_method == "Upload Image":
+        image_file = st.file_uploader(
+            "Select an image",
+            type=["jpg", "jpeg", "png"]
+        )
+    else:
+        image_file = st.camera_input("Capture an image")
+
+    st.markdown(
+        "<p style='color:#a9cbd2;font-size:13px;'>"
+        "Supported formats: JPG, JPEG and PNG"
+        "</p>",
+        unsafe_allow_html=True
+    )
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+with right:
+    if image_file is not None:
+        image = Image.open(image_file).convert("RGB")
+
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown("**Selected image**")
+        st.image(image, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class="panel" style="
+            min-height: 250px;
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            justify-content:center;
+            text-align:center;">
+            <div style="font-size:55px;">🌊</div>
+            <h3>Ready to explore?</h3>
+            <p style="color:#a9cbd2;">
+                Your selected image will appear here.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
 
 # ---------------- PREDICTION ----------------
 if image_file is not None:
-    try:
-        image = Image.open(image_file).convert("RGB")
 
-        st.markdown("### 🖼️ Your Selected Image")
-        st.image(
-            image,
-            caption="Image ready for analysis",
-            width=400
-        )
+    st.markdown("---")
 
-        if st.button("✨ Predict Fish Species"):
+    if st.button("✨ Analyze Image", use_container_width=True):
 
-            with st.spinner("Checking image and analyzing..."):
+        try:
+            with st.spinner("Analyzing image with Vision Transformer..."):
 
-                # Step 1: Check if image is a fish
-                fish_score, non_fish_score = check_if_fish(image)
+                inputs = processor(
+                    images=image,
+                    return_tensors="pt"
+                )
 
-                st.markdown("---")
+                with torch.inference_mode():
+                    outputs = model(**inputs)
 
-                # Step 2: Reject images that do not look like fish
-                # This threshold is a starting point and needs testing.
-                if fish_score < 0.60 or fish_score <= non_fish_score:
+                    probabilities = F.softmax(
+                        outputs.logits,
+                        dim=-1
+                    )[0]
 
-                    st.error("❌ This is not recognized as a fish image.")
+                top_values, top_indices = torch.topk(
+                    probabilities, 5
+                )
 
-                    st.write(
-                        f"Fish image score: {fish_score * 100:.2f}%"
-                    )
+            predicted_index = top_indices[0].item()
 
-                    st.write(
-                        f"Non-fish image score: {non_fish_score * 100:.2f}%"
-                    )
+            predicted_label = model.config.id2label[
+                predicted_index
+            ]
 
-                    st.info(
-                        "Please upload a clear image of a fish."
-                    )
+            confidence = top_values[0].item() * 100
 
-                    speak_result("This is not recognized as a fish image. Please upload a fish image.")
+            # ---------------- MAIN RESULT ----------------
+            st.markdown("---")
 
-                else:
-                    # Step 3: Use the original fish classification model
-                    inputs = fish_processor(
-                        images=image,
-                        return_tensors="pt"
-                    )
+            st.markdown(
+                '<div class="section-title">Analysis Result</div>',
+                unsafe_allow_html=True
+            )
 
-                    with torch.inference_mode():
-                        outputs = fish_model(**inputs)
-                        probabilities = F.softmax(
-                            outputs.logits,
-                            dim=-1
-                        )[0]
+            st.markdown(f"""
+            <div class="result-card">
+                <div style="font-size:42px;">🐟</div>
+                <h2>{predicted_label}</h2>
+                <p>Predicted Fish Species</p>
+                <h3 style="color:white;">
+                    {confidence:.2f}% confidence
+                </h3>
+            </div>
+            """, unsafe_allow_html=True)
 
-                    top_values, top_indices = torch.topk(
-                        probabilities,
-                        5
-                    )
+            # ---------------- TOP PREDICTIONS ----------------
+            st.markdown("### 📊 Prediction Details")
 
-                    predicted_index = top_indices[0].item()
-                    predicted_label = fish_model.config.id2label[
-                        predicted_index
-                    ]
-                    confidence = top_values[0].item() * 100
+            st.caption(
+                "The following results show the model's "
+                "five highest predicted class probabilities."
+            )
 
-                    st.markdown("## 🏆 Classification Result")
+            for probability, index in zip(
+                top_values, top_indices
+            ):
+                label = model.config.id2label[index.item()]
+                score = probability.item()
 
-                    st.markdown(f"""
-                    <div class="result-card">
-                        <h2>🐠 {predicted_label}</h2>
-                        <h3>Confidence: {confidence:.2f}%</h3>
-                        <p>Our AI model's most likely prediction</p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                col1, col2 = st.columns([3, 1])
 
-                    # Step 4: Speak fish name
-                    speak_result(
-                        f"The detected fish species is {predicted_label}. "
-                        f"Confidence is {confidence:.1f} percent."
-                    )
+                with col1:
+                    st.write(f"**{label}**")
+                    st.progress(score)
 
-                    # Step 5: Show top 5 predictions
-                    st.markdown("### 📊 Top 5 Predictions")
+                with col2:
+                    st.write(f"**{score * 100:.2f}%**")
 
-                    for probability, index in zip(
-                        top_values,
-                        top_indices
-                    ):
-                        label = fish_model.config.id2label[index.item()]
-                        percentage = probability.item() * 100
+        except Exception as e:
+            st.error(f"Prediction failed: {e}")
 
-                        st.write(
-                            f"**{label} — {percentage:.2f}%**"
-                        )
-                        st.progress(float(probability.item()))
-
-                    st.caption(
-                        "The fish classifier predicts among its 15 trained "
-                        "species. Predictions may be incorrect."
-                    )
-
-    except Exception as e:
-        st.error(f"Error processing image: {e}")
 
 # ---------------- FOOTER ----------------
-st.markdown("---")
 st.markdown("""
-<div style="text-align:center; padding:20px; color:#caf0f8;">
-    <h4>🌊 AquaVision AI</h4>
-    <p>Powered by Vision Transformer and CLIP</p>
-    <p>Built with Python, PyTorch and Streamlit</p>
-    <p>Fish Species Classification Project</p>
+<div class="footer">
+    <h3 style="color:#d5f3f5;">🌊 AquaVision AI</h3>
+    <p>Intelligent Fish Species Recognition</p>
+    <p>Powered by Vision Transformer · PyTorch · Hugging Face · Streamlit</p>
 </div>
 """, unsafe_allow_html=True)
-
-
