@@ -1,349 +1,289 @@
-
+import io
+import html
 import streamlit as st
 import torch
-import torch.nn.functional as F
-from transformers import ViTImageProcessor, ViTForImageClassification
+import torch.nn as nn
+from torchvision import models, transforms
+from transformers import AutoImageProcessor, ViTForImageClassification
+from huggingface_hub import hf_hub_download
 from PIL import Image
+import streamlit.components.v1 as components
 
-# ---------------- PAGE CONFIGURATION ----------------
+# ------------------------------------------------------------
+# AquaVision AI / Fish Finder AI
+# Two-stage pipeline:
+# 1) ResNet18: Fish vs Non-fish
+# 2) ViT: Fish species classification
+# ------------------------------------------------------------
+
 st.set_page_config(
-    page_title="AquaVision AI",
-    page_icon="🐠",
+    page_title="Fish Finder AI",
+    page_icon="🐟",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded",
 )
 
-MODEL_ID = "BismaLJ/fish_species_classification"
+SPECIES_MODEL_ID = "BismaLJ/fish_species_classification"
+DETECTOR_REPO_ID = "BismaLJ/fish_nonfish_detector"
+DETECTOR_FILENAME = "fish_nonfish_detector.pth"
 
-# ---------------- PROFESSIONAL CUSTOM DESIGN ----------------
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+@st.cache_resource
+def load_models():
+    # Load the original ViT species classifier.
+    processor = AutoImageProcessor.from_pretrained(SPECIES_MODEL_ID)
+    species_model = ViTForImageClassification.from_pretrained(SPECIES_MODEL_ID)
+    species_model.to(DEVICE)
+    species_model.eval()
+
+    # Download and load the separate fish/non-fish detector.
+    detector_path = hf_hub_download(
+        repo_id=DETECTOR_REPO_ID,
+        filename=DETECTOR_FILENAME,
+    )
+    checkpoint = torch.load(
+        detector_path,
+        map_location=DEVICE,
+        weights_only=True,
+    )
+
+    detector = models.resnet18(weights=None)
+    detector.fc = nn.Linear(detector.fc.in_features, 2)
+    detector.load_state_dict(checkpoint["model_state_dict"])
+    detector.to(DEVICE)
+    detector.eval()
+
+    class_names = checkpoint.get("class_names", ["Non-fish", "Fish"])
+    if "threshold" not in checkpoint:
+        raise ValueError(
+            "The detector checkpoint has no calibrated threshold. "
+            "Run the calibration-and-upload cell in your Colab notebook, "
+            "then upload the updated fish_nonfish_detector.pth to Hugging Face."
+        )
+    threshold = float(checkpoint["threshold"])
+
+    detector_transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225],
+        ),
+    ])
+
+    return processor, species_model, detector, class_names, threshold, detector_transform
+
+
+def detect_fish(image, detector, detector_transform, threshold):
+    image_tensor = detector_transform(image).unsqueeze(0).to(DEVICE)
+    with torch.inference_mode():
+        logits = detector(image_tensor)
+        probabilities = torch.softmax(logits, dim=1)[0]
+    fish_probability = float(probabilities[1].item())
+    return fish_probability, fish_probability >= threshold
+
+
+def identify_species(image, processor, species_model):
+    inputs = processor(images=image, return_tensors="pt")
+    inputs = {key: value.to(DEVICE) for key, value in inputs.items()}
+
+    with torch.inference_mode():
+        logits = species_model(**inputs).logits
+        probabilities = torch.softmax(logits, dim=1)[0]
+
+    top_values, top_indices = torch.topk(probabilities, k=min(5, probabilities.numel()))
+    predicted_id = int(top_indices[0].item())
+    species = species_model.config.id2label.get(
+        predicted_id, f"Class {predicted_id}"
+    )
+    confidence = float(top_values[0].item()) * 100
+
+    top_results = []
+    for score, index in zip(top_values.tolist(), top_indices.tolist()):
+        label = species_model.config.id2label.get(index, f"Class {index}")
+        top_results.append((label, score * 100))
+
+    return species, confidence, top_results
+
+
+def speech_controls(message, key):
+    safe_message = html.escape(message, quote=True)
+    components.html(
+        f"""
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+                    font-family:Arial,sans-serif;">
+          <button id="speak-{key}" style="background:#087f8c;color:white;
+            border:0;border-radius:24px;padding:10px 18px;font-weight:600;
+            cursor:pointer;">🔊 Speak result</button>
+          <button id="stop-{key}" style="background:#e8eef0;color:#183b40;
+            border:0;border-radius:24px;padding:10px 18px;font-weight:600;
+            cursor:pointer;">Stop</button>
+        </div>
+        <script>
+          const message = "{safe_message}";
+          document.getElementById("speak-{key}").onclick = () => {{
+            if (!("speechSynthesis" in window)) {{
+              alert("Speech is not supported by this browser.");
+              return;
+            }}
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(message);
+            utterance.rate = 0.92;
+            window.speechSynthesis.speak(utterance);
+          }};
+          document.getElementById("stop-{key}").onclick = () => {{
+            if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+          }};
+        </script>
+        """,
+        height=58,
+    )
+
+
+# ------------------------------ Styling ------------------------------
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-
-html, body, [class*="css"] {
-    font-family: 'Inter', sans-serif;
+.stApp { background: #f4f8f8; color: #17383c; }
+header[data-testid="stHeader"] { background: #0c454b; }
+.topbar {
+    background: linear-gradient(100deg,#073f46,#11636a);
+    color: white; padding: 18px 24px; border-radius: 0 0 16px 16px;
+    margin: -5.5rem -1rem 1.4rem -1rem;
+    font-size: 27px; font-weight: 750; letter-spacing: .2px;
 }
-
-.stApp {
-    background:
-        radial-gradient(circle at 15% 10%, #123c55 0%, transparent 35%),
-        linear-gradient(135deg, #061522, #092b3b 55%, #064b55);
-    color: #f1f7fa;
-}
-
-.block-container {
-    max-width: 1150px;
-    padding-top: 2rem;
-    padding-bottom: 3rem;
-}
-
-.hero {
-    text-align: center;
-    padding: 55px 25px 45px;
-    border: 1px solid rgba(125, 211, 225, 0.22);
-    border-radius: 25px;
-    background: linear-gradient(120deg,
-        rgba(10, 65, 86, 0.95),
-        rgba(0, 137, 145, 0.75));
-    margin-bottom: 35px;
-    box-shadow: 0 15px 45px rgba(0,0,0,0.25);
-}
-
-.hero h1 {
-    color: #ffffff;
-    font-size: 48px;
-    font-weight: 800;
-    letter-spacing: -1.5px;
-    margin-bottom: 10px;
-}
-
-.hero p {
-    color: #d5f3f5;
-    font-size: 17px;
-    margin: 5px 0;
-}
-
-.section-title {
-    font-size: 25px;
-    font-weight: 700;
-    color: #e8fbff;
-    margin: 25px 0 15px;
-}
-
+.eyebrow { color:#16858a; font-weight:700; letter-spacing:2px;
+           font-size:12px; text-transform:uppercase; }
+.main-title { color:#153d42; font-size:32px; font-weight:800;
+              margin:4px 0 18px 0; }
 .panel {
-    background: rgba(255,255,255,0.065);
-    border: 1px solid rgba(255,255,255,0.13);
-    border-radius: 18px;
-    padding: 24px;
-    margin-bottom: 20px;
+    background:white; border:1px solid #e1ebeb; border-radius:18px;
+    padding:20px; box-shadow:0 7px 24px rgba(15,65,70,.06);
 }
-
-.result-card {
-    background: linear-gradient(120deg, #087f83, #06a6a0);
-    border: 1px solid rgba(255,255,255,0.2);
-    border-radius: 20px;
-    padding: 30px 20px;
-    text-align: center;
-    margin: 20px 0;
-    box-shadow: 0 12px 30px rgba(0,0,0,0.2);
+.result {
+    background:#e3f6e9; border:1px solid #b9e5c6; color:#145b35;
+    border-radius:15px; padding:18px 20px; margin-top:18px;
 }
-
-.result-card h2 {
-    color: white;
-    font-size: 32px;
-    font-weight: 800;
-    margin-bottom: 8px;
+.reject {
+    background:#fff0ed; border:1px solid #ffd0c8; color:#8b3024;
+    border-radius:15px; padding:18px 20px; margin-top:18px;
 }
-
-.result-card p {
-    color: #e2ffff;
-    margin: 0;
+div.stButton > button {
+    border-radius:24px; min-height:44px; font-weight:700;
 }
-
-.stButton > button {
-    width: 100%;
-    border: none;
-    border-radius: 12px;
-    padding: 14px;
-    background: linear-gradient(90deg, #00bfa6, #00a6b2);
-    color: white;
-    font-weight: 700;
-    font-size: 16px;
-    transition: 0.2s ease;
-}
-
-.stButton > button:hover {
-    background: linear-gradient(90deg, #00d5b5, #00c1ca);
-    color: #062b36;
-    border: none;
-}
-
-[data-testid="stFileUploader"] {
-    background: rgba(255,255,255,0.04);
-    border: 1px dashed #54cbd0;
-    padding: 18px;
-    border-radius: 15px;
-}
-
-[data-testid="stCameraInput"] {
-    border-radius: 15px;
-}
-
-.stProgress > div > div > div {
-    background-color: #00c6ad;
-}
-
-h2, h3, h4, p, label {
-    color: #f1f7fa;
-}
-
-div[data-testid="stMetric"] {
-    background: rgba(255,255,255,0.07);
-    padding: 15px;
-    border-radius: 14px;
-}
-
-footer {
-    visibility: hidden;
-}
-
-#MainMenu {
-    visibility: hidden;
-}
-
-.footer {
-    text-align: center;
-    color: #a9cbd2;
-    padding: 30px 10px 5px;
-    border-top: 1px solid rgba(255,255,255,0.12);
-    margin-top: 45px;
-    font-size: 13px;
-}
+[data-testid="stSidebar"] { background:#ffffff; }
+.small-muted { color:#718589; font-size:13px; }
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown('<div class="topbar">🐟 &nbsp; Fish Finder AI</div>', unsafe_allow_html=True)
 
-# ---------------- HERO SECTION ----------------
-st.markdown("""
-<div class="hero">
-    <h1>🐠 AquaVision AI</h1>
-    <p>Explore the underwater world through Artificial Intelligence.</p>
-    <p>Upload or capture a fish image to discover its predicted species.</p>
-</div>
-""", unsafe_allow_html=True)
-
-
-# ---------------- LOAD EXISTING MODEL ----------------
-@st.cache_resource
-def load_model():
-    processor = ViTImageProcessor.from_pretrained(MODEL_ID)
-    model = ViTForImageClassification.from_pretrained(MODEL_ID)
-
-    model.eval()
-
-    return processor, model
-
-
-try:
-    with st.spinner("Preparing your AI experience..."):
-        processor, model = load_model()
-
-    st.success("AquaVision AI is ready.")
-
-except Exception as e:
-    st.error(f"Unable to load the AI model: {e}")
-    st.stop()
-
-
-# ---------------- IMAGE INPUT SECTION ----------------
-st.markdown(
-    '<div class="section-title">📷 Image Analysis</div>',
-    unsafe_allow_html=True
-)
-
-left, right = st.columns([1, 1], gap="large")
-
-with left:
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-
-    input_method = st.radio(
-        "Choose your image source",
-        ["Upload Image", "Use Camera"],
-        horizontal=True
+with st.sidebar:
+    st.markdown("## 🐠 Fish Finder AI")
+    st.caption("Your fish identification assistant")
+    st.divider()
+    page = st.radio(
+        "Navigation",
+        ["Fish Identification", "My Identifications", "Explore Species", "Settings"],
+        label_visibility="collapsed",
     )
+    st.divider()
+    st.markdown('<p class="small-muted">AquaVision AI · Powered by ResNet18 + ViT</p>',
+                unsafe_allow_html=True)
 
-    image_file = None
+if page == "Fish Identification":
+    st.markdown('<div class="eyebrow">AquaVision AI</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-title">Fish Identification</div>', unsafe_allow_html=True)
+    st.write("Upload a fish photo or capture one with your camera to identify its species.")
 
-    if input_method == "Upload Image":
-        image_file = st.file_uploader(
-            "Select an image",
-            type=["jpg", "jpeg", "png"]
-        )
-    else:
-        image_file = st.camera_input("Capture an image")
-
-    st.markdown(
-        "<p style='color:#a9cbd2;font-size:13px;'>"
-        "Supported formats: JPG, JPEG and PNG"
-        "</p>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-
-with right:
-    if image_file is not None:
-        image = Image.open(image_file).convert("RGB")
-
+    left, right = st.columns([1, 1], gap="large")
+    with left:
         st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.markdown("**Selected image**")
-        st.image(image, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div class="panel" style="
-            min-height: 250px;
-            display:flex;
-            flex-direction:column;
-            align-items:center;
-            justify-content:center;
-            text-align:center;">
-            <div style="font-size:55px;">🌊</div>
-            <h3>Ready to explore?</h3>
-            <p style="color:#a9cbd2;">
-                Your selected image will appear here.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("### Choose an image")
+        uploaded_file = st.file_uploader(
+            "Select from Gallery",
+            type=["jpg", "jpeg", "png", "webp"],
+            label_visibility="collapsed",
+        )
+        camera_file = st.camera_input("Capture New Photo")
+        st.markdown("</div>", unsafe_allow_html=True)
 
+    image_file = camera_file if camera_file is not None else uploaded_file
 
-# ---------------- PREDICTION ----------------
-if image_file is not None:
+    with right:
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown("### Image preview")
+        if image_file is not None:
+            try:
+                image = Image.open(image_file).convert("RGB")
+                st.image(image, use_container_width=True)
+            except Exception:
+                st.error("This image could not be opened. Please choose another image.")
+                image = None
+        else:
+            image = None
+            st.info("Your selected image will appear here.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("---")
+    if image is not None:
+        if st.button("Identify Fish", type="primary", use_container_width=True):
+            try:
+                with st.spinner("Checking the image and identifying the species..."):
+                    processor, species_model, detector, class_names, threshold, detector_transform = load_models()
+                    fish_probability, is_fish = detect_fish(
+                        image, detector, detector_transform, threshold
+                    )
 
-    if st.button("✨ Analyze Image", use_container_width=True):
+                    if not is_fish:
+                        st.markdown(
+                            f"""
+                            <div class="reject">
+                              <h3>✕ This is not a fish image</h3>
+                              <p>The fish detector's score was {fish_probability*100:.1f}%.
+                              Please upload a clear fish photograph.</p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        speech_controls("This is not a fish image. Please upload a fish photograph.", "reject")
+                    else:
+                        species, confidence, top_results = identify_species(
+                            image, processor, species_model
+                        )
+                        st.markdown(
+                            f"""
+                            <div class="result">
+                              <h3>✓ Prediction: {html.escape(species)}</h3>
+                              <h4>Confidence: {confidence:.1f}%</h4>
+                              <p>Fish detector score: {fish_probability*100:.1f}%</p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown("### Top 5 predictions")
+                        for label, score in top_results:
+                            st.write(f"**{label}** — {score:.1f}%")
+                            st.progress(min(max(score / 100, 0.0), 1.0))
+                        speech_controls(
+                            f"The detected fish species is {species}. Confidence {confidence:.1f} percent.",
+                            "fish",
+                        )
+            except Exception as error:
+                st.error("The models could not be loaded or the prediction failed.")
+                st.exception(error)
 
-        try:
-            with st.spinner("Analyzing image with Vision Transformer..."):
+elif page == "My Identifications":
+    st.markdown('<div class="main-title">My Identifications</div>', unsafe_allow_html=True)
+    st.info("Identification history is not saved yet. This can be added as a future feature.")
 
-                inputs = processor(
-                    images=image,
-                    return_tensors="pt"
-                )
+elif page == "Explore Species":
+    st.markdown('<div class="main-title">Explore Species</div>', unsafe_allow_html=True)
+    st.write("The species classifier recognizes the 15 fish classes included in its training dataset.")
+    st.caption("Species names and predictions are provided by the trained ViT model.")
 
-                with torch.inference_mode():
-                    outputs = model(**inputs)
-
-                    probabilities = F.softmax(
-                        outputs.logits,
-                        dim=-1
-                    )[0]
-
-                top_values, top_indices = torch.topk(
-                    probabilities, 5
-                )
-
-            predicted_index = top_indices[0].item()
-
-            predicted_label = model.config.id2label[
-                predicted_index
-            ]
-
-            confidence = top_values[0].item() * 100
-
-            # ---------------- MAIN RESULT ----------------
-            st.markdown("---")
-
-            st.markdown(
-                '<div class="section-title">Analysis Result</div>',
-                unsafe_allow_html=True
-            )
-
-            st.markdown(f"""
-            <div class="result-card">
-                <div style="font-size:42px;">🐟</div>
-                <h2>{predicted_label}</h2>
-                <p>Predicted Fish Species</p>
-                <h3 style="color:white;">
-                    {confidence:.2f}% confidence
-                </h3>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # ---------------- TOP PREDICTIONS ----------------
-            st.markdown("### 📊 Prediction Details")
-
-            st.caption(
-                "The following results show the model's "
-                "five highest predicted class probabilities."
-            )
-
-            for probability, index in zip(
-                top_values, top_indices
-            ):
-                label = model.config.id2label[index.item()]
-                score = probability.item()
-
-                col1, col2 = st.columns([3, 1])
-
-                with col1:
-                    st.write(f"**{label}**")
-                    st.progress(score)
-
-                with col2:
-                    st.write(f"**{score * 100:.2f}%**")
-
-        except Exception as e:
-            st.error(f"Prediction failed: {e}")
-
-
-# ---------------- FOOTER ----------------
-st.markdown("""
-<div class="footer">
-    <h3 style="color:#d5f3f5;">🌊 AquaVision AI</h3>
-    <p>Intelligent Fish Species Recognition</p>
-    <p>Powered by Vision Transformer · PyTorch · Hugging Face · Streamlit</p>
-</div>
-""", unsafe_allow_html=True)
+else:
+    st.markdown('<div class="main-title">Settings</div>', unsafe_allow_html=True)
+    st.write("Device:", "GPU" if torch.cuda.is_available() else "CPU")
+    st.caption("Speech uses your browser or device's built-in text-to-speech voice.")
+    st.caption("The fish detector was trained on underwater fish and empty-scene images; performance on unrelated everyday objects has not been fully validated.")
