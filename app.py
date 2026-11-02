@@ -62,7 +62,7 @@ def load_models():
             "Run the calibration-and-upload cell in your Colab notebook, "
             "then upload the updated fish_nonfish_detector.pth to Hugging Face."
         )
-    threshold = float(checkpoint["threshold"])
+    threshold = 0.50
 
     detector_transform = transforms.Compose([
         transforms.Resize((224, 224)),
