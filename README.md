@@ -31,29 +31,49 @@ Dataset
 
 The project uses a fish image dataset provided in the archive Fish set 4.zip.
 
-* Total images: 561
-* Number of classes: 15
-* Training images: 386
-* Validation images: 75
-* Testing images: 100
+
 
 Fish Species Classes
+Total fish species: 25
+Fish species labels:
+0 :  Jinnaok :Top shell kator
+1 :  Mushko: croaker 
+2 : Alwahor 
+3 : Balochi  Gallo
+English spotted catfish
+4 : Balochi  gore 
+English narrow-barred  Spanish mackerel
+5 : Balochi  madak 
+English jinga shrimp
+6 : Balochi  pittan 
+English Arabian banded whipray
+7 : Balochi  sisi mayyah 
+English indian squid
+8 : Balochi chancho 
+English spinycheek grouper
+9 : Balochi mahpari 
+English white spotted spinefoot
+10 : Balochi saram 
+English ltalang queenfish
+11 : Balochi.   kund 
+English.   Giant baracude
+12 : Balochileejar 
+English indian oil sardine
+13 : Black pamplet
+14 : Galbath 
+15 : Kanakawad 
+16 : Koh prosh 
+17 : Lutari
+18 : Pathar 
+19 : Ping
+20 : Sawaso 
+21 : Shurr
+22 : Soli
+23 : Surr
+24 : White pamplet
 
-1. Jinnaok : Top shell kator
-2. Alwahor
-3. Black pamplet
-4. Chanchu
-5. Gorr
-6. Jinga : madag
-7. Koh prosh
-8. Konad
-9. Lujar
-10. Mah pari : Safi
-11. Mushko
-12. Sawaso
-13. Shurr
-14. Soli
-15. White pamplet
+
+
 
 Model Information
 
@@ -63,7 +83,7 @@ The project uses the pretrained Vision Transformer (ViT) model.
 * Framework: Hugging Face Transformers
 * Architecture: Vision Transformer
 * Input image size: 224 × 224
-* Number of output classes: 15
+* Number of output classes: 25
 
 The original classification head was adapted for the 15 fish species, and the model was fine-tuned using the prepared dataset.
 
@@ -75,7 +95,7 @@ Batch size	8
 Learning rate	0.00002
 Image size	224 × 224
 Model	ViT-Base-Patch16-224
-Number of classes	15
+Number of classes	25
 
 Image Preprocessing
 
@@ -93,8 +113,12 @@ Model Performance
 The trained model achieved the following results:
 
 Evaluation	Accuracy
-Best validation accuracy	82.67%
-Test accuracy	82%
+Training Loss : 0.043074
+Validation Loss	: 0.368784	
+Epoch	:10
+Accuracy:0.907336
+
+
 
 The test dataset contained 100 images, and the model correctly classified approximately 82 of them.
 
